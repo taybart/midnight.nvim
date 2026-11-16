@@ -1,0 +1,36 @@
+module opts = {}
+module count, other = 0, 1
+module handler = (x) -> x + 1
+local helper = () -> 'helper'
+global shout = (s) => s:upper()
+
+module class Animal {
+  sound = 'hm'
+  new(name) { self.name = name }
+  static create() { return Animal.new('x') }
+  speak() { return self.sound }
+}
+
+local class Dog : Animal {
+  speak() { return 'woof' }
+}
+
+module function setup(o) {
+  local function merge(a, b) { return b }
+  module.opts = merge(module.opts, o)
+}
+
+function M.a.b() {}
+function M:method() {}
+local function private() {}
+
+a.b = () -> 1
+local t = {
+  g = y => 2,
+  ['k'] = () -> 3,
+  n = 4,
+}
+local plain = 5
+module declared
+module tbl = { a = 1 }
+module render = () -> <p>hi</p>

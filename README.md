@@ -14,6 +14,8 @@ Neovim support for [Midnight](https://github.com/taybart/midnight) (including
   ex. `and-or`: `a && b || c` where `b` can be nil (use `if a { b } else { c }`)
 - [rest](https://github.com/taybart/rest): lints `<<MIDNIGHT` heredocs in .rest
   files, and knows rest's globals in projects w/ a .rest file
+- symbols for [aerial.nvim](https://github.com/stevearc/aerial.nvim) (see
+  [aerial](#aerial))
 - `:MidnightCompile` shows the lua a buffer compiles to, updated as you edit
 - a file icon (󰖔) w/ [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons),
   so pickers (ex. snacks), statuslines, and file trees show it
@@ -134,3 +136,34 @@ own rule, or `vim.b.midnight_globals = { 'vim' }` for a one off buffer.
 This only covers the linter's undefined global checks: it doesn't know the
 `vim` API's shape (lazydev.nvim does that for lua_ls, which doesn't read .mn
 files).
+
+## aerial
+
+aerial.nvim's tree-sitter backend picks up `queries/midnight/aerial.scm`, no
+setup needed. Outlines show:
+
+| Midnight | Kind |
+| --- | --- |
+| `class A {}` (any scope) | Class |
+| `new()` / `static f()` / `f()` in a class | Constructor / Function / Method |
+| `x = 1` in a class | Field |
+| `function f()`, `function M.a.b()`, `local f = () -> ...`, `a.b = () -> ...`, `{ f = () -> ... }` | Function |
+| `function M:m()` | Method |
+| `module x = 1`, `module x` | Variable |
+
+Symbols nest by range (methods under their class, local functions under the
+function they're in), and have the declaration's `local` / `global` / `module`
+as their scope (ex. to hide locals w/ `post_parse_symbol`). aerial hides
+Variables and Fields by default; to show them for midnight:
+
+```lua
+require('aerial').setup({
+  filter_kind = {
+    -- (other filetypes keep aerial's default, or your list as `['_'] = {...}`)
+    midnight = { 'Class', 'Constructor', 'Function', 'Method', 'Field', 'Variable' },
+  },
+})
+```
+
+`make test-aerial` checks the symbols for `test/aerial/fixture.mn` against
+`test/aerial/expected.txt` (`make update-aerial` rewrites it).

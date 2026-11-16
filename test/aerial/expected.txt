@@ -1,0 +1,23 @@
+Variable opts (module) :1
+Variable count (module) :2
+Function handler (module) :3
+Function helper (local) :4
+Function shout (global) :5
+Class Animal (module) :7
+  Field sound :8
+  Constructor new :9
+  Function create :10
+  Method speak :11
+Class Dog (local) :14
+  Method speak :15
+Function setup (module) :18
+  Function merge (local) :19
+Function M.a.b :23
+Method M:method :24
+Function private (local) :25
+Function a.b :27
+Function g :29
+Function k :30
+Variable declared (module) :34
+Variable tbl (module) :35
+Function render (module) :36
