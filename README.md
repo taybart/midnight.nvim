@@ -80,6 +80,9 @@ require('midnight').setup({
   nvim = true,
   -- compile on write in projects w/ a midnight.json (see below)
   compile = true,
+  -- a quiet "compiled ..." notice when a write changes the output (fidget.nvim
+  -- if it's installed, else vim.notify); false: only show compile errors
+  compile_notify = true,
 })
 ```
 
@@ -122,6 +125,10 @@ Midnight:
 
 saves `midnight/foo/init.mn` to `lua/foo/init.lua`, which is what neovim
 `require`s. `require('midnight').compile_file(buf)` does the same on demand.
+After a write that changed the compiled output, a quiet `compiled …` notice
+shows (via fidget.nvim's corner window if it's installed, else `vim.notify`);
+saving w/o a change stays quiet, and errors use `vim.notify`. Set
+`compile_notify = false` to only hear about errors.
 
 ### Neovim code
 

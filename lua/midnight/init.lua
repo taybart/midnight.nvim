@@ -1,5 +1,9 @@
 local M = {}
 
+-- last compiled output (path -> content), so compile_notify can tell when a
+-- write actually changed the output and stay quiet otherwise
+M._compiled = {}
+
 ---@class midnight.Config
 M.config = {
   -- the midnight cli (`go install github.com/taybart/midnight/cmd/midnight@latest`)
@@ -37,6 +41,10 @@ M.config = {
   -- ({ "compile": { "src": "midnight", "out": "lua" } }) into compile.out
   -- (`midnight compile -project`: files outside compile.src are skipped)
   compile = true,
+  -- a quiet "compiled ..." notice when a write changes the output (w/
+  -- fidget.nvim's corner window if it's installed, else vim.notify);
+  -- false: only errors
+  compile_notify = true,
 }
 
 ---@param opts? midnight.Config
@@ -245,7 +253,9 @@ function M.compile(buf)
 end
 
 --- compiles buf's file into its project's compile.out (see config.compile),
---- if it's in a project w/ a midnight.json. Errors are shown w/ vim.notify.
+--- if it's in a project w/ a midnight.json. On success it shows a quiet
+--- "compiled ..." notice (config.compile_notify) only when the output changed;
+--- errors use vim.notify.
 ---@param buf? integer
 function M.compile_file(buf)
   buf = buf or vim.api.nvim_get_current_buf()
@@ -254,12 +264,48 @@ function M.compile_file(buf)
   local cmd = vim.list_extend({ M.config.cmd, 'compile', '-project' }, M.factory_args())
   cmd[#cmd + 1] = vim.api.nvim_buf_get_name(buf)
   vim.system(cmd, { cwd = root, text = true }, function(res)
-    if res.code == 0 then return end
     vim.schedule(function()
+      if res.code == 0 then
+        M.compile_notify(buf, root, res.stdout)
+        return
+      end
       local msg = vim.trim((res.stdout or '') .. (res.stderr or ''))
       vim.notify(msg, vim.log.levels.ERROR, { title = 'midnight compile' })
     end)
   end)
+end
+
+--- the "compiled ..." notice after a write (config.compile_notify). It only
+--- shows when the compiled output actually changed since the last compile, so
+--- saving w/o edits stays quiet. fidget.nvim's corner window if it's installed,
+--- else vim.notify; a shared `key` reuses fidget's last notice instead of
+--- stacking them.
+---@param buf integer
+---@param root string
+---@param stdout string
+function M.compile_notify(buf, root, stdout)
+  if not M.config.compile_notify then return end
+  -- `midnight compile -project` echoes the output path it wrote, in the same
+  -- (here absolute) form as the buffer name it was given; make it absolute
+  -- regardless
+  local out = stdout and stdout:match('=>%s*(%S+)')
+  if out then
+    if not (out:match('^/') or out:match('^%a:[/\\]') or out:match('^\\\\')) then
+      out = vim.fs.joinpath(root, out)
+    end
+    local path = vim.fs.normalize(out)
+    local content = vim.uv.fs_stat(path) and table.concat(vim.fn.readfile(path), '\n') or nil
+    if content and content == M._compiled[path] then return end
+    M._compiled[path] = content
+  end
+  local name = vim.api.nvim_buf_get_name(buf)
+  local msg = 'compiled ' .. (vim.fs.relpath(root, name) or name)
+  local ok, fidget = pcall(require, 'fidget')
+  if ok and fidget.notify then
+    fidget.notify(msg, vim.log.levels.INFO, { key = 'midnight.compile', annote = 'midnight' })
+  else
+    vim.notify(msg, vim.log.levels.INFO, { title = 'midnight compile' })
+  end
 end
 
 --- shows the compiled lua in a split, kept up to date as the buffer changes
