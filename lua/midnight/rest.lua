@@ -94,9 +94,11 @@ function M.setup()
 end
 
 --- is buf part of a rest project (there's a .rest file in it, or a parent dir)?
+--- (a bare `.rest`, ex. rest's ~/.rest, doesn't count)
 ---@param buf integer
 function M.in_project(buf)
-  return vim.fs.root(buf, function(name) return name:match('%.rest$') ~= nil end) ~= nil
+  return vim.fs.root(buf, function(name) return name ~= '.rest' and name:match('%.rest$') ~= nil end)
+    ~= nil
 end
 
 return M

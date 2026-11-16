@@ -73,6 +73,11 @@ require('midnight').setup({
   comments = true,
   -- lint .rest heredocs, rest's globals in rest projects
   rest = true,
+  -- the `vim` global in neovim code (true: detect, false: never, or a
+  -- function(buf): boolean)
+  nvim = true,
+  -- compile on write in projects w/ a midnight.json (see below)
+  compile = true,
 })
 ```
 
@@ -98,4 +103,34 @@ require('lint').linters.midnight = require('midnight').linter()
 `.rest` files' `<<MIDNIGHT` heredocs are linted (w/ rest's globals) on read, write,
 and leaving insert mode, and `.mn` files in a directory w/ a `.rest` file (or
 under one) get rest's globals too (`rest`, `kv`, `json`, ...). Load the plugin
-on startup (not `ft = 'midnight'`) so it's there for .rest files.
+on startup (not `ft = 'midnight'`) so it's there for .rest files. A `.rest`
+file counts, a bare `.rest` (ex. rest's `~/.rest`) doesn't.
+
+### Compile on write
+
+In a project w/ a `midnight.json` (see midnight's docs/TOOLS.md), saving a
+`.mn` file under its `compile.src` compiles it to the same path under
+`compile.out`. Files outside `src` (and projects w/o a `midnight.json`) are left
+alone, and compile errors show up w/ `vim.notify`. Ex. a plugin written in
+Midnight:
+
+```json
+{ "compile": { "src": "midnight", "out": "lua" } }
+```
+
+saves `midnight/foo/init.mn` to `lua/foo/init.lua`, which is what neovim
+`require`s. `require('midnight').compile_file(buf)` does the same on demand.
+
+### Neovim code
+
+Midnight written for neovim (a plugin, or your config) is linted w/ the `vim`
+global, so `vim.api...` isn't an undefined global. A buffer is neovim code
+when it's under `stdpath('config')`, or in a runtime directory (`lua/`,
+`plugin/`, `ftplugin/`, `after/`, ...) of a project w/ a `lua/` directory,
+ex. `foo.nvim/lua/foo/init.mn`, or anywhere in a project whose `midnight.json`
+is next to a `lua/` directory (ex. `foo.nvim/midnight/foo/init.mn`). Use `nvim = function(buf) ... end` for your
+own rule, or `vim.b.midnight_globals = { 'vim' }` for a one off buffer.
+
+This only covers the linter's undefined global checks: it doesn't know the
+`vim` API's shape (lazydev.nvim does that for lua_ls, which doesn't read .mn
+files).

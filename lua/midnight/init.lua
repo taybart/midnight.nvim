@@ -29,6 +29,14 @@ M.config = {
   -- rest (https://github.com/taybart/rest): lint `<<MIDNIGHT` heredocs in .rest
   -- files, and know rest's globals in .mn files of projects w/ a .rest file
   rest = true,
+  -- neovim code (your config, or a plugin's lua/, plugin/, ... dirs) gets
+  -- neovim's `vim` global. true: detect it (see M.is_nvim), false: never, or
+  -- a function(buf): boolean
+  nvim = true,
+  -- on write, compile .mn files of projects w/ a midnight.json
+  -- ({ "compile": { "src": "midnight", "out": "lua" } }) into compile.out
+  -- (`midnight compile -project`: files outside compile.src are skipped)
+  compile = true,
 }
 
 ---@param opts? midnight.Config
@@ -50,6 +58,13 @@ function M.setup(opts)
     end
   end
   M.register_icon()
+  if M.config.compile then
+    vim.api.nvim_create_autocmd('BufWritePost', {
+      group = vim.api.nvim_create_augroup('midnight.compile', { clear = true }),
+      pattern = { '*.mn', '*.midnight' },
+      callback = function(ev) M.compile_file(ev.buf) end,
+    })
+  end
   if M.config.comments then require('midnight.comment').setup() end
   if M.config.rest then require('midnight.rest').setup() end
 end
@@ -64,7 +79,54 @@ function M.globals(buf)
   if M.config.rest and require('midnight.rest').in_project(buf) then
     vim.list_extend(globals, require('midnight.rest').globals)
   end
+  local nvim = M.config.nvim
+  if nvim == true then nvim = M.is_nvim end
+  if nvim and nvim(buf) then globals[#globals + 1] = 'vim' end
   return vim.list_extend(globals, vim.b[buf].midnight_globals or {})
+end
+
+-- runtimepath directories neovim loads code from
+local runtime_dirs = {
+  lua = true,
+  plugin = true,
+  ftplugin = true,
+  after = true,
+  autoload = true,
+  indent = true,
+  syntax = true,
+  colors = true,
+  compiler = true,
+}
+
+--- is buf neovim code? Files in your config (stdpath('config')), in a
+--- runtime directory (lua/, plugin/, ftplugin/, after/, ...) of a project with
+--- a lua/ directory, ie. a plugin (ex. foo.nvim/lua/foo/init.mn), and anywhere
+--- in a project whose midnight.json is next to a lua/ directory (a plugin w/
+--- its midnight sources elsewhere, ex. foo.nvim/midnight/foo/init.mn)
+---@param buf integer
+---@return boolean
+function M.is_nvim(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name == '' then return false end
+  local path = vim.uv.fs_realpath(name) or vim.fs.normalize(name)
+
+  local config = vim.uv.fs_realpath(vim.fn.stdpath('config'))
+  if config and vim.startswith(path, config .. '/') then return true end
+
+  for dir in vim.fs.parents(path) do
+    if runtime_dirs[vim.fs.basename(dir)] then
+      local root = vim.fs.dirname(dir)
+      local stat = vim.uv.fs_stat(root .. '/lua')
+      if stat and stat.type == 'directory' then return true end
+    end
+  end
+
+  local project = vim.fs.root(path, 'midnight.json')
+  if project then
+    local stat = vim.uv.fs_stat(project .. '/lua')
+    if stat and stat.type == 'directory' then return true end
+  end
+  return false
 end
 
 --- `-markup-factory name` (or nothing w/o a configured factory)
@@ -180,6 +242,24 @@ function M.compile(buf)
   local res = vim.system(cmd, { stdin = src, text = true }):wait()
   if res.code ~= 0 then return nil, vim.trim((res.stderr or '') .. (res.stdout or '')) end
   return vim.split(res.stdout, '\n', { trimempty = false })
+end
+
+--- compiles buf's file into its project's compile.out (see config.compile),
+--- if it's in a project w/ a midnight.json. Errors are shown w/ vim.notify.
+---@param buf? integer
+function M.compile_file(buf)
+  buf = buf or vim.api.nvim_get_current_buf()
+  local root = vim.fs.root(buf, 'midnight.json')
+  if not root then return end
+  local cmd = vim.list_extend({ M.config.cmd, 'compile', '-project' }, M.factory_args())
+  cmd[#cmd + 1] = vim.api.nvim_buf_get_name(buf)
+  vim.system(cmd, { cwd = root, text = true }, function(res)
+    if res.code == 0 then return end
+    vim.schedule(function()
+      local msg = vim.trim((res.stdout or '') .. (res.stderr or ''))
+      vim.notify(msg, vim.log.levels.ERROR, { title = 'midnight compile' })
+    end)
+  end)
 end
 
 --- shows the compiled lua in a split, kept up to date as the buffer changes
