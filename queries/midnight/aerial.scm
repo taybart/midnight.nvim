@@ -51,10 +51,10 @@
   (#set! "kind" "Function")) @symbol
 
 ; Arrow functions assigned to names (only the first name / value is paired,
-; ex. `local f = () -> 1`, not `local a, f = 1, () -> 2`)
+; ex. `local f = () -> 1` or `const f = ...`, not `local a, f = 1, () -> 2`)
 
 (variable_declaration
-  scope: (scope) @scope
+  scope: (scope)? @scope
   (variable_list
     .
     name: (identifier) @name)
@@ -99,6 +99,7 @@
     .
     value: [
       (binary_expression)
+      (catch_expression)
       (false)
       (function_call)
       (if_expression)

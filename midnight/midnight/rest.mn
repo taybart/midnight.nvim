@@ -1,0 +1,104 @@
+-- midnight in rest (https://github.com/taybart/rest): lints `<<MN` / `<<MIDNIGHT` heredocs in
+-- .rest files, and knows the globals rest gives scripts (and pages)
+
+-- the globals rest sets for scripts (setup, fn, after, cli, ...)
+module globals = {
+  'rest', 'kv', 'json', 'jwt', 'form', 'inspect', 'colors', 'base64', 'url', 'html',
+  'uuid', 'ulid', 'nanoid', 'tools', 'copy', 'fail', 'cli', 'input', 'expired_token',
+}
+
+-- heredoc identifiers (`<<MN`, `<<-midnight`, ...) that hold midnight
+const heredoc_ids = { MN = true, MIDNIGHT = true }
+
+module ns = vim.api.nvim_create_namespace('midnight.rest')
+module runs = {} ---@type table<integer, integer>
+
+--- the midnight heredocs in a rest buffer: { first = 0-based row of the first
+--- line of code, lines = { ... } }
+---@param buf integer
+module function heredocs(buf) {
+  local parser = vim.treesitter.get_parser(buf, 'hcl') catch nil
+  if !parser { return {} }
+  local tree = parser:parse()[1]
+  local query = vim.treesitter.query.parse('hcl',
+    '(heredoc_template (heredoc_identifier) @id) @doc'
+  )
+  local docs, seen = {}, {}
+  for _, captures in query:iter_matches(tree:root(), buf, 0, -1, { all = true }) {
+    local doc, id
+    for capture, nodes in pairs(captures) {
+      match query.captures[capture] {
+        'doc' => { doc = nodes[1] }
+        'id' => { id = nodes[#nodes] }
+        _ => {}
+      }
+    }
+    -- (matches each identifier: `<<MN` / `<<-MIDNIGHT`, etc. and the closing one)
+    if doc && id && !seen[doc:id()] && heredoc_ids[vim.treesitter.get_node_text(id, buf):upper()] {
+      seen[doc:id()] = true
+      local start_row, _, end_row = doc:range()
+      docs[#docs + 1] = {
+        first = start_row + 1,
+        lines = vim.api.nvim_buf_get_lines(buf, start_row + 1, end_row, false),
+      }
+    }
+  }
+  return docs
+}
+
+--- is (0-based) row code in a midnight heredoc?
+---@param buf integer
+---@param row integer
+module function in_heredoc(buf, row) {
+  for _, doc in ipairs(heredocs(buf)) {
+    if row >= doc.first && row < doc.first + #doc.lines { return true }
+  }
+  return false
+}
+
+--- runs `midnight lint` on each midnight heredoc in a rest buffer
+---@param buf? integer
+module function lint(buf = vim.api.nvim_get_current_buf()) {
+  local midnight = require('midnight')
+  local args = vim.list_extend({ midnight.config.cmd, 'lint' }, midnight.factory_args())
+  local names = vim.list_extend(vim.deepcopy(globals), midnight.config.globals)
+  vim.list_extend(args, { '-g', table.concat(names, ','), '-' })
+
+  local docs = heredocs(buf)
+  -- only the latest run's results are used
+  runs[buf] = (runs[buf] || 0) + 1
+  local run = runs[buf]
+  local diagnostics, pending = {}, #docs
+  if pending == 0 { return vim.diagnostic.reset(ns, buf) }
+
+  for _, doc in ipairs(docs) {
+    vim.system(args, { stdin = table.concat(doc.lines, '\n'), text = true }, vim.schedule_wrap((res) -> {
+      for _, d in ipairs(midnight.parse_lint(res.stdout || '')) {
+        d.lnum += doc.first
+        diagnostics[#diagnostics + 1] = d
+      }
+      pending -= 1
+      if pending == 0 && runs[buf] == run && vim.api.nvim_buf_is_valid(buf) {
+        vim.diagnostic.set(ns, buf, diagnostics)
+      }
+    }))
+  }
+}
+
+--- is buf part of a rest project (there's a .rest file in it, or a parent dir)?
+--- (a bare `.rest`, ex. rest's ~/.rest, doesn't count)
+---@param buf integer
+module function in_project(buf) {
+  return vim.fs.root(buf, (name) -> name != '.rest' && name:match('%.rest$') != nil)
+    != nil
+}
+
+--- lints rest buffers' heredocs on read, write, and leaving insert mode
+module function setup() {
+  local group = vim.api.nvim_create_augroup('midnight.rest', { clear = true })
+  vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufWritePost', 'InsertLeave' }, {
+    group = group,
+    pattern = '*.rest',
+    callback = (ev) -> lint(ev.buf),
+  })
+}

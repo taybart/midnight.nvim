@@ -33,4 +33,7 @@ local t = {
 local plain = 5
 module declared
 module tbl = { a = 1 }
+module cfg = load_config() catch nil
 module render = () -> <p>hi</p>
+const double = (n) -> n * 2
+module const VERSION = '1'

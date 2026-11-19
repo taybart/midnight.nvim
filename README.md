@@ -1,7 +1,7 @@
 # midnight.nvim
 
 Neovim support for [Midnight](https://github.com/taybart/midnight) (including
-`match`, `if` / `match` expressions, and markup):
+`match`, `if` / `match` expressions, `catch`, `const`, and markup):
 
 - `midnight` filetype and `gf` on `require('src/layout')`
 - `gc` comments markup children w/ `{--[[ ]]}` and code w/ `--` (in .rest

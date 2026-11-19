@@ -20,4 +20,7 @@ Function g :29
 Function k :30
 Variable declared (module) :34
 Variable tbl (module) :35
-Function render (module) :36
+Variable cfg (module) :36
+Function render (module) :37
+Function double :38
+Variable VERSION (module) :39
