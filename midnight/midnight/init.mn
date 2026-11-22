@@ -20,10 +20,10 @@ module config = {
     url = 'https://github.com/taybart/tree-sitter-midnight',
     path = nil,
   },
-  -- register the `midnight_fmt` formatter w/ conform.nvim (if it's installed)
-  conform = true,
-  -- register the `midnight` linter w/ nvim-lint (if it's installed)
-  lint = true,
+  -- start `midnight lsp` for midnight buffers (diagnostics, formatting, go to
+  -- definition, references, highlights; neovim 0.11+). A table is merged into
+  -- its vim.lsp.config
+  lsp = true,
   -- the .mn / .midnight file icon, registered w/ nvim-web-devicons (if it's
   -- installed), where snacks, lualine, oil, ... get file icons from
   -- (false: don't register one)
@@ -47,24 +47,35 @@ module config = {
   compile_notify = true,
 }
 
+--- registers and enables the `midnight` language server (`midnight lsp`).
+--- It asks for each buffer's lint globals (see globals) w/
+--- workspace/configuration; after changing them (ex. vim.b.midnight_globals),
+--- `:lua vim.lsp.get_clients({ name = 'midnight' })[1]:notify('workspace/didChangeConfiguration', { settings = {} })`
+--- relints.
+module function register_lsp() {
+  if !vim.lsp.config { return } -- (neovim < 0.11)
+  local lsp = {
+    cmd = { config.cmd, 'lsp' },
+    filetypes = { 'midnight' },
+    root_markers = { 'midnight.json', '.luarc.json', '.git' },
+    handlers = {
+      ['workspace/configuration'] = (_, params) -> vim.tbl_map((item) -> {
+        if item.section != 'midnight' || !item.scopeUri { return vim.NIL }
+        return { globals = globals(vim.uri_to_bufnr(item.scopeUri)) }
+      }, params.items),
+    },
+  }
+  if config.markup_factory { lsp.init_options = { markupFactory = config.markup_factory } }
+  if type(config.lsp) == 'table' { lsp = vim.tbl_deep_extend('force', lsp, config.lsp) }
+  vim.lsp.config('midnight', lsp)
+  vim.lsp.enable('midnight')
+}
+
 ---@param opts? midnight.Config
 module function setup(opts = {}) {
   config = vim.tbl_deep_extend('force', config, opts)
   register_parser()
-  if config.conform {
-    local conform = require('conform') catch nil
-    if conform {
-      conform.formatters.midnight_fmt = formatter()
-      conform.formatters_by_ft.midnight = conform.formatters_by_ft.midnight || { 'midnight_fmt' }
-    }
-  }
-  if config.lint {
-    local lint = require('lint') catch nil
-    if lint {
-      lint.linters.midnight = linter()
-      lint.linters_by_ft.midnight = lint.linters_by_ft.midnight || { 'midnight' }
-    }
-  }
+  if config.lsp { register_lsp() }
   register_icon()
   if config.compile {
     vim.api.nvim_create_autocmd('BufWritePost', {
@@ -188,16 +199,8 @@ module function register_parser() {
   })
 }
 
---- conform.nvim formatter
-module function formatter() {
-  return {
-    command = config.cmd,
-    args = { 'fmt', '-' },
-    stdin = true,
-  }
-}
-
---- `<stdin>:12: message (rule)` -> diagnostics
+--- `<stdin>:12: message (rule)` -> diagnostics (for .rest heredocs, see
+--- midnight.rest)
 ---@param output string
 ---@return vim.Diagnostic[]
 module function parse_lint(output) {
@@ -218,23 +221,6 @@ module function parse_lint(output) {
     }
   }
   return diagnostics
-}
-
---- nvim-lint linter (a function, so the args are built for each run)
-module function linter() {
-  return () -> {
-    local args = vim.list_extend({ 'lint' }, factory_args())
-    local names = globals()
-    if #names > 0 { vim.list_extend(args, { '-g', table.concat(names, ',') }) }
-    args[#args + 1] = '-'
-    return {
-      cmd = config.cmd,
-      args = args,
-      stdin = true,
-      ignore_exitcode = true, -- exits 1 when there are problems
-      parser = (output) -> parse_lint(output),
-    }
-  }
 }
 
 --- `midnight -c` the buffer, ie. the lua it compiles to

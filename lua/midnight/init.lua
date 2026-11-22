@@ -21,9 +21,9 @@ url = "https://github.com/taybart/tree-sitter-midnight",
 path = nil
 }, 
 
-conform = true, 
 
-lint = true, 
+
+lsp = true, 
 
 
 
@@ -47,24 +47,35 @@ compile = true,
 compile_notify = true
 }
 
+--- registers and enables the `midnight` language server (`midnight lsp`).
+--- It asks for each buffer's lint globals (see globals) w/
+--- workspace/configuration; after changing them (ex. vim.b.midnight_globals),
+--- `:lua vim.lsp.get_clients({ name = 'midnight' })[1]:notify('workspace/didChangeConfiguration', { settings = {} })`
+--- relints.
+function _MODULE.register_lsp()
+  if not vim.lsp.config then return end
+  local lsp = {
+  cmd = {_MODULE.config.cmd, "lsp"}, 
+  filetypes = {"midnight"}, 
+  root_markers = {"midnight.json", ".luarc.json", ".git"}, 
+  handlers = {[
+  "workspace/configuration"] = function(_, params) return vim.tbl_map(function(item)
+      if item.section ~= "midnight" or not item.scopeUri then return vim.NIL end
+      return {globals = _MODULE.globals(vim.uri_to_bufnr(item.scopeUri))}
+    end, params.items) end
+  }
+  }
+  if _MODULE.config.markup_factory then lsp.init_options = {markupFactory = _MODULE.config.markup_factory} end
+  if type(_MODULE.config.lsp) == "table" then lsp = vim.tbl_deep_extend("force", lsp, _MODULE.config.lsp) end
+  vim.lsp.config("midnight", lsp)
+  vim.lsp.enable("midnight")
+end
+
 ---@param opts? midnight.Config
 function _MODULE.setup(opts) if opts == nil then opts = {} end
   _MODULE.config = vim.tbl_deep_extend("force", _MODULE.config, opts)
   _MODULE.register_parser()
-  if _MODULE.config.conform then
-    local __MIDNIGHT_TMP_3__ do local __MIDNIGHT_TMP_4__, __MIDNIGHT_TMP_5__ = pcall(require, "conform") if __MIDNIGHT_TMP_4__ then __MIDNIGHT_TMP_3__ = __MIDNIGHT_TMP_5__ else __MIDNIGHT_TMP_3__ = nil end end local conform = __MIDNIGHT_TMP_3__
-    if conform then
-      conform.formatters.midnight_fmt = _MODULE.formatter()
-      conform.formatters_by_ft.midnight = conform.formatters_by_ft.midnight or {"midnight_fmt"}
-    end
-  end
-  if _MODULE.config.lint then
-    local __MIDNIGHT_TMP_8__ do local __MIDNIGHT_TMP_9__, __MIDNIGHT_TMP_10__ = pcall(require, "lint") if __MIDNIGHT_TMP_9__ then __MIDNIGHT_TMP_8__ = __MIDNIGHT_TMP_10__ else __MIDNIGHT_TMP_8__ = nil end end local lint = __MIDNIGHT_TMP_8__
-    if lint then
-      lint.linters.midnight = _MODULE.linter()
-      lint.linters_by_ft.midnight = lint.linters_by_ft.midnight or {"midnight"}
-    end
-  end
+  if _MODULE.config.lsp then _MODULE.register_lsp() end
   _MODULE.register_icon()
   if _MODULE.config.compile then
     vim.api.nvim_create_autocmd("BufWritePost", {
@@ -86,7 +97,7 @@ function _MODULE.globals(buf) if buf == nil then buf = vim.api.nvim_get_current_
   if _MODULE.config.rest and require("midnight.rest").in_project(buf) then
     vim.list_extend(names, require("midnight.rest").globals)
   end
-  local __MIDNIGHT_TMP_11__ if _MODULE.config.nvim == true then __MIDNIGHT_TMP_11__ = _MODULE.is_nvim else __MIDNIGHT_TMP_11__ = _MODULE.config.nvim end local nvim = __MIDNIGHT_TMP_11__
+  local __MIDNIGHT_TMP_1__ if _MODULE.config.nvim == true then __MIDNIGHT_TMP_1__ = _MODULE.is_nvim else __MIDNIGHT_TMP_1__ = _MODULE.config.nvim end local nvim = __MIDNIGHT_TMP_1__
   if nvim and nvim(buf) then names[#names + 1] = "vim" end
   return vim.list_extend(names, vim.b[buf].midnight_globals or {})
 end
@@ -146,7 +157,7 @@ end
 function _MODULE.register_icon()
   local icon = _MODULE.config.icon
   if not icon then return end
-  local __MIDNIGHT_TMP_15__ do local __MIDNIGHT_TMP_16__, __MIDNIGHT_TMP_17__ = pcall(require, "nvim-web-devicons") if __MIDNIGHT_TMP_16__ then __MIDNIGHT_TMP_15__ = __MIDNIGHT_TMP_17__ else return end end local devicons = __MIDNIGHT_TMP_15__
+  local __MIDNIGHT_TMP_5__ do local __MIDNIGHT_TMP_6__, __MIDNIGHT_TMP_7__ = pcall(require, "nvim-web-devicons") if __MIDNIGHT_TMP_6__ then __MIDNIGHT_TMP_5__ = __MIDNIGHT_TMP_7__ else return end end local devicons = __MIDNIGHT_TMP_5__
   local data = {
   icon = icon.glyph, 
   color = icon.color, 
@@ -174,7 +185,7 @@ end
 --- (`:TSInstall midnight` installs it)
 function _MODULE.register_parser()
   if not _MODULE.config.treesitter then return end
-  local __MIDNIGHT_TMP_20__ do local __MIDNIGHT_TMP_21__, __MIDNIGHT_TMP_22__ = pcall(require, "nvim-treesitter.parsers") if __MIDNIGHT_TMP_21__ then __MIDNIGHT_TMP_20__ = __MIDNIGHT_TMP_22__ else __MIDNIGHT_TMP_20__ = nil end end local parsers = __MIDNIGHT_TMP_20__
+  local __MIDNIGHT_TMP_10__ do local __MIDNIGHT_TMP_11__, __MIDNIGHT_TMP_12__ = pcall(require, "nvim-treesitter.parsers") if __MIDNIGHT_TMP_11__ then __MIDNIGHT_TMP_10__ = __MIDNIGHT_TMP_12__ else __MIDNIGHT_TMP_10__ = nil end end local parsers = __MIDNIGHT_TMP_10__
   if type(parsers) == "table" then parsers.midnight = _MODULE.parser_info() end
   if _ts_autocmd then return end
   _ts_autocmd = vim.api.nvim_create_autocmd("User", {
@@ -188,16 +199,8 @@ function _MODULE.register_parser()
   })
 end
 
---- conform.nvim formatter
-function _MODULE.formatter()
-  return {
-  command = _MODULE.config.cmd, 
-  args = {"fmt", "-"}, 
-  stdin = true
-  }
-end
-
---- `<stdin>:12: message (rule)` -> diagnostics
+--- `<stdin>:12: message (rule)` -> diagnostics (for .rest heredocs, see
+--- midnight.rest)
 ---@param output string
 ---@return vim.Diagnostic[]
 function _MODULE.parse_lint(output)
@@ -218,23 +221,6 @@ function _MODULE.parse_lint(output)
     end
   end
   return diagnostics
-end
-
---- nvim-lint linter (a function, so the args are built for each run)
-function _MODULE.linter()
-  return function()
-    local args = vim.list_extend({"lint"}, _MODULE.factory_args())
-    local names = _MODULE.globals()
-    if #names > 0 then vim.list_extend(args, {"-g", table.concat(names, ",")}) end
-    args[#args + 1] = "-"
-    return {
-    cmd = _MODULE.config.cmd, 
-    args = args, 
-    stdin = true, 
-    ignore_exitcode = true, 
-    parser = function(output) return _MODULE.parse_lint(output) end
-    }
-  end
 end
 
 --- `midnight -c` the buffer, ie. the lua it compiles to
@@ -289,13 +275,13 @@ function _MODULE.compile_notify(buf, root, stdout)
       out = vim.fs.joinpath(root, out)
     end
     local path = vim.fs.normalize(out)
-    local __MIDNIGHT_TMP_26__ do local __MIDNIGHT_TMP_27__, __MIDNIGHT_TMP_28__ = pcall(function() return table.concat(vim.fn.readfile(path), "\n") end) if __MIDNIGHT_TMP_27__ then __MIDNIGHT_TMP_26__ = __MIDNIGHT_TMP_28__ else __MIDNIGHT_TMP_26__ = nil end end local content = __MIDNIGHT_TMP_26__
+    local __MIDNIGHT_TMP_16__ do local __MIDNIGHT_TMP_17__, __MIDNIGHT_TMP_18__ = pcall(function() return table.concat(vim.fn.readfile(path), "\n") end) if __MIDNIGHT_TMP_17__ then __MIDNIGHT_TMP_16__ = __MIDNIGHT_TMP_18__ else __MIDNIGHT_TMP_16__ = nil end end local content = __MIDNIGHT_TMP_16__
     if content and content == _MODULE._compiled[path] then return end
     _MODULE._compiled[path] = content
   end
   local name = vim.api.nvim_buf_get_name(buf)
   local msg = "compiled " .. tostring(vim.fs.relpath(root, name) or name)
-  local __MIDNIGHT_TMP_31__ do local __MIDNIGHT_TMP_32__, __MIDNIGHT_TMP_33__ = pcall(require, "fidget") if __MIDNIGHT_TMP_32__ then __MIDNIGHT_TMP_31__ = __MIDNIGHT_TMP_33__ else __MIDNIGHT_TMP_31__ = nil end end local fidget = __MIDNIGHT_TMP_31__
+  local __MIDNIGHT_TMP_21__ do local __MIDNIGHT_TMP_22__, __MIDNIGHT_TMP_23__ = pcall(require, "fidget") if __MIDNIGHT_TMP_22__ then __MIDNIGHT_TMP_21__ = __MIDNIGHT_TMP_23__ else __MIDNIGHT_TMP_21__ = nil end end local fidget = __MIDNIGHT_TMP_21__
   if fidget and fidget.notify then
     fidget.notify(msg, vim.log.levels.INFO, {key = "midnight.compile", annote = "midnight"}) else
 

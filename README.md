@@ -9,9 +9,13 @@ Neovim support for [Midnight](https://github.com/taybart/midnight) (including
 - tree-sitter highlighting w/
   [tree-sitter-midnight](https://github.com/taybart/tree-sitter-midnight) (css/js
   injected in `<style>` / `<script>`)
-- formatting w/ `midnight fmt` ([conform.nvim](https://github.com/stevearc/conform.nvim))
-- diagnostics w/ `midnight lint` ([nvim-lint](https://github.com/mfussenegger/nvim-lint)),
-  ex. `and-or`: `a && b || c` where `b` can be nil (use `if a { b } else { c }`)
+- a language server, `midnight lsp` (neovim 0.11+, no other plugins needed):
+  - diagnostics w/ `midnight lint`, ex. `and-or`: `a && b || c` where `b` can
+    be nil (use `if a { b } else { c }`)
+  - formatting w/ `midnight fmt` (`vim.lsp.buf.format()`, or conform.nvim's
+    LSP fallback)
+  - go to definition / references: locals, `module` names, `global`s across
+    the workspace, and through `require('...')`
 - [rest](https://github.com/taybart/rest): lints `<<MIDNIGHT` heredocs in .rest
   files, and knows rest's globals in projects w/ a .rest file
 - symbols for [aerial.nvim](https://github.com/stevearc/aerial.nvim) (see
@@ -65,9 +69,10 @@ require('midnight').setup({
     url = 'https://github.com/taybart/tree-sitter-midnight',
     path = nil, -- a local checkout of the grammar, instead of url
   },
-  -- register the formatter / linter if conform / nvim-lint are installed
-  conform = true,
-  lint = true,
+  -- start `midnight lsp` (diagnostics, formatting, go to definition,
+  -- references, highlights; neovim 0.11+). A table is merged into its
+  -- vim.lsp.config, ex. { cmd = {...} }
+  lsp = true,
   -- the .mn / .midnight icon, registered w/ nvim-web-devicons if it's
   -- installed (false: don't)
   icon = { glyph = '󰖔', color = '#5b8fd9', cterm_color = '68' },
@@ -86,22 +91,25 @@ require('midnight').setup({
 })
 ```
 
-`setup()` adds `midnight_fmt` to conform and `midnight` to nvim-lint (and sets them
-for the midnight filetype unless you already have). nvim-lint still needs to be
-told when to lint, ex.:
+### LSP
+
+`setup()` registers and enables `midnight lsp` for the midnight filetype
+(`vim.lsp.config('midnight', ...)`, so it can also be configured there). The
+server lints as you type, w/ each buffer's globals (`globals`, rest's in rest
+projects, `vim` in neovim code, and `vim.b.midnight_globals`, which the plugin
+sends it when asked) plus the nearest `.luarc.json`'s. To format on save:
 
 ```lua
-vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufWritePost', 'InsertLeave' }, {
-  callback = function() require('lint').try_lint() end,
+vim.api.nvim_create_autocmd('BufWritePre', {
+  pattern = { '*.mn', '*.midnight' },
+  callback = function() vim.lsp.buf.format({ name = 'midnight' }) end,
 })
 ```
 
-To set them up yourself instead (w/ `conform = false, lint = false`):
-
-```lua
-require('conform').formatters.midnight_fmt = require('midnight').formatter()
-require('lint').linters.midnight = require('midnight').linter()
-```
+Upgrading from conform / nvim-lint: drop `conform` / `lint` from `setup()`, and
+`midnight` from conform's `formatters_by_ft` / nvim-lint's `linters_by_ft` if
+you set them yourself (the plugin no longer provides `formatter()` /
+`linter()`).
 
 ### rest
 
